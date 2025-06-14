@@ -8,9 +8,9 @@ from openai.types.chat.chat_completion import ChatCompletion
 
 from utils.config import app_settings
 from utils.logger import logger
+from utils.exceptions import LLMException
 from schema.llm.message import Message, ToolMessage
 from schema.llm.tool import AbstractTool, ToolCall
-from core.exceptions import LLMException
 
 
 def collect_tools() -> dict[str, dict[str, Any]]:

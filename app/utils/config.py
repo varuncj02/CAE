@@ -18,6 +18,11 @@ class Config(BaseSettings):
     EMBEDDING_MODEL_API_KEY: str
     EMBEDDING_MODEL_BASE_URL: str
     EMBEDDING_MODEL_NAME: str
+    DB_HOST: str
+    DB_PORT: int
+    DB_NAME: str
+    DB_USER: str
+    DB_SECRET: str
     LOG_LEVEL: str | None = "INFO"
 
 
