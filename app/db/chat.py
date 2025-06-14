@@ -1,0 +1,111 @@
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker, declarative_base, Mapped, mapped_column
+from sqlalchemy import String, DateTime, ForeignKey, JSON, select
+from pgvector.sqlalchemy import Vector
+from uuid import UUID, uuid4
+from datetime import datetime
+import sqlalchemy as sa
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+from ..schema.llm.chat import Chat, ChatMessage, ChatRole
+from ..utils.config import app_settings
+
+Base = declarative_base()
+
+
+class ChatModel(Base):
+    __tablename__ = "chat"
+    id: Mapped[UUID] = mapped_column(sa.UUID, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(sa.UUID, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ChatMessageModel(Base):
+    __tablename__ = "chat_message"
+    id: Mapped[UUID] = mapped_column(sa.UUID, primary_key=True, default=uuid4)
+    chat_id: Mapped[UUID] = mapped_column(ForeignKey("chat.id"), nullable=False)
+    role: Mapped[ChatRole] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(String, nullable=False)
+    tool_calls: Mapped[dict | None] = mapped_column(JSON)
+    tool_call_id: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    embedding: Mapped[Vector | None] = mapped_column(Vector(4096))
+
+
+class Database:
+    def __init__(self, db_url: str):
+        self.engine = create_async_engine(
+            db_url, echo=False, pool_size=20, max_overflow=10
+        )
+        self.async_session_maker = sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
+        )
+
+    async def create_db_and_tables(self):
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    @asynccontextmanager
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+        async with self.async_session_maker() as session:
+            yield session
+
+
+DATABASE_URL = f"postgresql+asyncpg://{app_settings.DB_USER}:{app_settings.DB_SECRET}@{app_settings.DB_HOST}:{app_settings.DB_PORT}/{app_settings.DB_NAME}"
+db = Database(DATABASE_URL)
+
+
+async def create_chat_session(user_id: UUID) -> Chat:
+    """Creates a new chat session for a given user and returns the Chat object."""
+    async with db.get_session() as session:
+        new_chat = ChatModel(user_id=user_id)
+        session.add(new_chat)
+        await session.commit()
+        await session.refresh(new_chat)
+        return Chat.model_validate(new_chat)
+
+
+async def get_chat_session(chat_id: UUID) -> Chat | None:
+    """Retrieves a chat session by its ID."""
+    async with db.get_session() as session:
+        result = await session.get(ChatModel, chat_id)
+        return Chat.model_validate(result) if result else None
+
+
+async def create_chat_message(message: ChatMessage) -> ChatMessage:
+    """Adds a new message to the database."""
+    async with db.get_session() as session:
+        new_message = ChatMessageModel(**message.model_dump())
+        session.add(new_message)
+        await session.commit()
+        await session.refresh(new_message)
+        return ChatMessage.model_validate(new_message)
+
+
+async def get_chat_history(chat_id: UUID) -> list[ChatMessage]:
+    """Retrieves all messages for a given chat session, ordered by created_at."""
+    async with db.get_session() as session:
+        result = await session.execute(
+            select(ChatMessageModel)
+            .where(ChatMessageModel.chat_id == chat_id)
+            .order_by(ChatMessageModel.created_at)
+        )
+        messages = result.scalars().all()
+        return [ChatMessage.model_validate(m) for m in messages]
+
+
+async def delete_chat_session(chat_id: UUID) -> None:
+    """Deletes a chat session and all associated messages from the database."""
+    async with db.get_session() as session:
+        # First, delete all messages associated with the chat_id
+        await session.execute(
+            sa.delete(ChatMessageModel).where(ChatMessageModel.chat_id == chat_id)
+        )
+
+        # Then, delete the chat session itself
+        chat_to_delete = await session.get(ChatModel, chat_id)
+        if chat_to_delete:
+            await session.delete(chat_to_delete)
+
+        await session.commit()

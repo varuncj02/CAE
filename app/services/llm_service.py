@@ -6,11 +6,11 @@ from typing import Any
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 
-from utils.config import app_settings
-from utils.logger import logger
-from utils.exceptions import LLMException
-from schema.llm.message import Message, ToolMessage
-from schema.llm.tool import AbstractTool, ToolCall
+from ..utils.config import app_settings
+from ..utils.logger import logger
+from ..utils.exceptions import LLMException
+from ..schema.llm.message import Message, ToolMessage
+from ..schema.llm.tool import AbstractTool, ToolCall
 
 
 def collect_tools() -> dict[str, dict[str, Any]]:
@@ -224,9 +224,12 @@ class LLMService:
         """
         client = self._client()
 
+        # Convert Message objects to dictionaries for OpenAI API
+        message_dicts = [msg.model_dump() for msg in messages]
+
         request_params = {
             "model": self.model_name,
-            "messages": messages,
+            "messages": message_dicts,
             "tools": tools,
             "response_format": {"type": "json_object"} if json_response else None,
             **kwargs,
@@ -236,9 +239,9 @@ class LLMService:
             "Making LLM API request",
             extra={
                 "request_id": request_id,
-                "latest_message_content": messages[-1].get("content", "")[:200] + "..."
-                if len(str(messages[-1].get("content", ""))) > 200
-                else messages[-1].get("content", ""),
+                "latest_message_content": messages[-1].content[:200] + "..."
+                if len(str(messages[-1].content)) > 200
+                else messages[-1].content,
                 "request_params": {
                     "model": request_params["model"],
                     "message_count": len(messages),
@@ -326,15 +329,22 @@ class LLMService:
             },
         )
 
-        full_messages = (
-            messages + [initial_completion.choices[0].message] + tool_results
-        )
+        # Convert all messages to dictionaries for OpenAI API
+        message_dicts = [msg.model_dump() for msg in messages]
+
+        # Add the assistant's message with tool calls
+        assistant_msg = initial_completion.choices[0].message
+        message_dicts.append(assistant_msg.model_dump())
+
+        # Add tool results
+        for tool_result in tool_results:
+            message_dicts.append(tool_result.model_dump())
 
         logger.debug(
             "Making follow-up LLM request with tool results",
             extra={
                 "request_id": request_id,
-                "total_message_count": len(full_messages),
+                "total_message_count": len(message_dicts),
                 "tool_result_count": len(tool_results),
             },
         )
@@ -342,7 +352,7 @@ class LLMService:
         client = self._client()
         final_completion = await client.chat.completions.create(
             model=self.model_name,
-            messages=full_messages,
+            messages=message_dicts,
             response_format={"type": "json_object"} if json_response else None,
             **kwargs,
         )
