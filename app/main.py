@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from app.api import chat as chat_api
+from app.api import user as user_api
 from app.db.chat import db
 from app.utils.logger import logger
 from fastapi import Request, status
@@ -146,6 +147,7 @@ async def health_check():
     return {"status": "healthy"}
 
 
+app.include_router(user_api.router)
 app.include_router(chat_api.router)
 
 

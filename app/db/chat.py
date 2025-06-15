@@ -1,6 +1,12 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base, Mapped, mapped_column
-from sqlalchemy import String, DateTime, ForeignKey, JSON, select
+from sqlalchemy.orm import (
+    sessionmaker,
+    declarative_base,
+    Mapped,
+    mapped_column,
+    relationship,
+)
+from sqlalchemy import String, DateTime, ForeignKey, JSON, select, delete
 from pgvector.sqlalchemy import Vector
 from uuid import UUID, uuid4
 from datetime import datetime
@@ -9,28 +15,56 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from ..schema.llm.chat import Chat, ChatMessage, ChatRole
+from ..schema.user import User
 from ..utils.config import app_settings
 
 Base = declarative_base()
 
 
+class UserModel(Base):
+    __tablename__ = "user"
+    id: Mapped[UUID] = mapped_column(sa.UUID, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationship to chats - cascade delete
+    chats: Mapped[list["ChatModel"]] = relationship(
+        "ChatModel", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
 class ChatModel(Base):
     __tablename__ = "chat"
     id: Mapped[UUID] = mapped_column(sa.UUID, primary_key=True, default=uuid4)
-    user_id: Mapped[UUID] = mapped_column(sa.UUID, nullable=False)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationship to user
+    user: Mapped[UserModel] = relationship("UserModel", back_populates="chats")
+
+    # Relationship to messages - cascade delete
+    messages: Mapped[list["ChatMessageModel"]] = relationship(
+        "ChatMessageModel", back_populates="chat", cascade="all, delete-orphan"
+    )
 
 
 class ChatMessageModel(Base):
     __tablename__ = "chat_message"
     id: Mapped[UUID] = mapped_column(sa.UUID, primary_key=True, default=uuid4)
-    chat_id: Mapped[UUID] = mapped_column(ForeignKey("chat.id"), nullable=False)
+    chat_id: Mapped[UUID] = mapped_column(
+        ForeignKey("chat.id", ondelete="CASCADE"), nullable=False
+    )
     role: Mapped[ChatRole] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(String, nullable=False)
     tool_calls: Mapped[dict | None] = mapped_column(JSON)
     tool_call_id: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     embedding: Mapped[Vector | None] = mapped_column(Vector(4096))
+
+    # Relationship to chat
+    chat: Mapped[ChatModel] = relationship("ChatModel", back_populates="messages")
 
 
 class Database:
@@ -54,6 +88,60 @@ class Database:
 
 DATABASE_URL = f"postgresql+asyncpg://{app_settings.DB_USER}:{app_settings.DB_SECRET}@{app_settings.DB_HOST}:{app_settings.DB_PORT}/{app_settings.DB_NAME}"
 db = Database(DATABASE_URL)
+
+
+async def create_user(name: str) -> User:
+    """Creates a new user and returns the User object."""
+    async with db.get_session() as session:
+        new_user = UserModel(name=name)
+        session.add(new_user)
+        await session.commit()
+        await session.refresh(new_user)
+        return User.model_validate(new_user)
+
+
+async def get_user(user_id: UUID) -> User | None:
+    """Retrieves a user by their ID."""
+    async with db.get_session() as session:
+        result = await session.get(UserModel, user_id)
+        return User.model_validate(result) if result else None
+
+
+async def delete_user(user_id: UUID) -> bool:
+    """
+    Deletes a user and all their associated chats and messages.
+    Returns True if user was deleted, False if user was not found.
+    """
+    async with db.get_session() as session:
+        user = await session.get(UserModel, user_id)
+        if not user:
+            return False
+
+        await session.delete(user)
+        await session.commit()
+        return True
+
+
+async def list_users() -> list[User]:
+    """Retrieves all users in the system."""
+    async with db.get_session() as session:
+        result = await session.execute(
+            select(UserModel).order_by(UserModel.created_at.desc())
+        )
+        users = result.scalars().all()
+        return [User.model_validate(u) for u in users]
+
+
+async def get_user_chats(user_id: UUID) -> list[Chat]:
+    """Retrieves all chat sessions for a specific user."""
+    async with db.get_session() as session:
+        result = await session.execute(
+            select(ChatModel)
+            .where(ChatModel.user_id == user_id)
+            .order_by(ChatModel.created_at.desc())
+        )
+        chats = result.scalars().all()
+        return [Chat.model_validate(c) for c in chats]
 
 
 async def create_chat_session(user_id: UUID) -> Chat:
