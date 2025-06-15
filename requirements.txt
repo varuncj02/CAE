@@ -83,3 +83,6 @@ uvicorn==0.34.3
 wcwidth==0.2.13
 websockets==15.0.1
 zipp==3.23.0
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+pgvector==0.2.4

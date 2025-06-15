@@ -55,9 +55,9 @@ def clean_json_response(response: str) -> dict:
 class LLMService:
     def __init__(
         self,
-        base_url: str = app_settings.LLM_API_BASE_URL,
-        api_key: str = app_settings.LLM_API_KEY,
-        model_name: str = app_settings.LLM_MODEL_NAME,
+        base_url: str = app_settings.INFLECTION_BASE_URL,
+        api_key: str = app_settings.INFLECTION_API_KEY,
+        model_name: str = app_settings.INFLECTION_MODEL,
     ):
         self.base_url = base_url
         self.api_key = api_key
@@ -70,6 +70,8 @@ class LLMService:
         return AsyncOpenAI(
             base_url=self.base_url,
             api_key=self.api_key,
+            timeout=float(app_settings.LLM_TIMEOUT_SECONDS),  # Configurable timeout
+            max_retries=3,
         )
 
     async def query_llm(

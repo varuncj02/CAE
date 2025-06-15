@@ -24,6 +24,7 @@ class Config(BaseSettings):
     DB_USER: str
     DB_SECRET: str
     LOG_LEVEL: str | None = "INFO"
+    LLM_TIMEOUT_SECONDS: int = 600  # Default 10 minutes, can be overridden by env var
 
 
 app_settings = Config()

@@ -67,6 +67,29 @@ class ChatMessageModel(Base):
     chat: Mapped[ChatModel] = relationship("ChatModel", back_populates="messages")
 
 
+class ConversationAnalysisModel(Base):
+    __tablename__ = "conversation_analysis"
+    id: Mapped[UUID] = mapped_column(sa.UUID, primary_key=True, default=uuid4)
+    chat_id: Mapped[UUID] = mapped_column(
+        ForeignKey("chat.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Store the 5 branches explored
+    branches: Mapped[list[dict]] = mapped_column(JSON, nullable=False)
+
+    # The selected branch index and response
+    selected_branch_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    selected_response: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Analysis and scoring details
+    analysis: Mapped[str] = mapped_column(String, nullable=False)
+    scores: Mapped[dict[str, float]] = mapped_column(JSON, nullable=False)
+
+    # Relationship to chat
+    chat: Mapped[ChatModel] = relationship("ChatModel")
+
+
 class Database:
     def __init__(self, db_url: str):
         self.engine = create_async_engine(
@@ -197,3 +220,60 @@ async def delete_chat_session(chat_id: UUID) -> None:
             await session.delete(chat_to_delete)
 
         await session.commit()
+
+
+async def create_conversation_analysis(
+    chat_id: UUID,
+    branches: list[dict],
+    selected_branch_index: int,
+    selected_response: str,
+    analysis: str,
+    scores: dict[str, float],
+) -> dict:
+    """Creates a new conversation analysis record."""
+    async with db.get_session() as session:
+        new_analysis = ConversationAnalysisModel(
+            chat_id=chat_id,
+            branches=branches,
+            selected_branch_index=selected_branch_index,
+            selected_response=selected_response,
+            analysis=analysis,
+            scores=scores,
+        )
+        session.add(new_analysis)
+        await session.commit()
+        await session.refresh(new_analysis)
+        return {
+            "id": new_analysis.id,
+            "chat_id": new_analysis.chat_id,
+            "created_at": new_analysis.created_at,
+            "branches": new_analysis.branches,
+            "selected_branch_index": new_analysis.selected_branch_index,
+            "selected_response": new_analysis.selected_response,
+            "analysis": new_analysis.analysis,
+            "scores": new_analysis.scores,
+        }
+
+
+async def get_chat_analyses(chat_id: UUID) -> list[dict]:
+    """Retrieves all analyses for a given chat session."""
+    async with db.get_session() as session:
+        result = await session.execute(
+            select(ConversationAnalysisModel)
+            .where(ConversationAnalysisModel.chat_id == chat_id)
+            .order_by(ConversationAnalysisModel.created_at.desc())
+        )
+        analyses = result.scalars().all()
+        return [
+            {
+                "id": a.id,
+                "chat_id": a.chat_id,
+                "created_at": a.created_at,
+                "branches": a.branches,
+                "selected_branch_index": a.selected_branch_index,
+                "selected_response": a.selected_response,
+                "analysis": a.analysis,
+                "scores": a.scores,
+            }
+            for a in analyses
+        ]
