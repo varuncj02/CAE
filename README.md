@@ -417,11 +417,21 @@ Here's what you get from a conversation analysis:
 
 ### Prerequisites
 
-- Python 3.10+
-- PostgreSQL 14+
+- Python 3.10+ (for local development)
+- PostgreSQL 14+ (or use Docker)
+- Docker and Docker Compose (for containerized deployment)
 - An OpenAI-compatible LLM API endpoint
 
-### Installation & Setup
+### Quick Start Scripts
+
+We provide convenient scripts to get you started quickly:
+
+- **Docker Quick Start**: `./scripts/docker-start.sh` - Interactive setup with Docker
+- **Local Development**: `./scripts/start.sh` - Sets up and runs locally with auto-configuration
+
+### Quick Start with Docker
+
+The easiest way to get started is using Docker Compose:
 
 1.  Clone the repository:
     ```bash
@@ -429,44 +439,170 @@ Here's what you get from a conversation analysis:
     cd CAE
     ```
 
-2.  Create a virtual environment:
+2.  Copy the example environment file and configure it:
+    ```bash
+    cp env.example .env
+    # Edit .env with your API keys and configuration
+    ```
+
+3.  Start the application with Docker Compose:
+    ```bash
+    docker-compose up -d
+    ```
+
+The API will be available at `http://localhost:8000` with interactive docs at `http://localhost:8000/docs`.
+
+To stop the application:
+```bash
+docker-compose down
+```
+
+To view logs:
+```bash
+docker-compose logs -f cae
+```
+
+### Local Development Setup
+
+For local development without Docker:
+
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/MVPandey/CAE.git
+    cd CAE
+    ```
+
+2.  Run the start script:
+    ```bash
+    ./scripts/start.sh
+    ```
+
+    This script will:
+    - Check Python version (3.10+ required)
+    - Create a virtual environment if needed
+    - Install all dependencies
+    - Check for `.env` file (create from template if missing)
+    - Verify PostgreSQL connection
+    - Start the FastAPI server with hot-reloading
+
+3.  If you don't have a `.env` file, the script will create one. Update it with your configuration:
+    ```bash
+    cp env.example .env
+    # Edit .env with your actual values
+    ```
+
+### Manual Setup
+
+If you prefer manual setup:
+
+1.  Create a virtual environment:
     ```bash
     python -m venv venv
     source venv/bin/activate  # On Windows: venv\Scripts\activate
     ```
 
-3.  Install dependencies (the `--no-deps` flag helps avoid potential conflicts):
+2.  Install dependencies:
     ```bash
     pip install -r requirements.txt --no-deps
     ```
 
-4.  Set up your environment variables by creating a `.env` file in the project root:
-    ```env
-    LLM_API_KEY=your-api-key
-    LLM_API_BASE_URL=https://api.openai.com/v1
-    LLM_MODEL_NAME=gpt-4
-    EMBEDDING_MODEL_API_KEY=your-api-key
-    EMBEDDING_MODEL_BASE_URL=https://api.openai.com/v1
-    EMBEDDING_MODEL_NAME=text-embedding-3-large
-    DB_HOST=localhost
-    DB_PORT=5432
-    DB_NAME=conversation_analysis
-    DB_USER=your-db-user
-    DB_SECRET=your-db-password
-    LOG_LEVEL=INFO
-    LLM_TIMEOUT_SECONDS=600
+3.  Set up your environment variables:
+    ```bash
+    cp env.example .env
+    # Edit .env with your configuration
     ```
 
-### Running for Development
+4.  Run the application:
+    ```bash
+    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ```
 
-The recommended way to run the application is using the VS Code launch configuration, which enables hot-reloading and debugging.
+### Running with VS Code
 
-1.  Open the project in VS Code.
-2.  Go to the Run and Debug view (Ctrl+Shift+D).
-3.  Select "Debug FastAPI" from the launch configuration dropdown.
-4.  Press F5 to start the server.
+For debugging with VS Code:
 
-The API will then be available at `http://localhost:8000` with interactive docs at `http://localhost:8000/docs`.
+1.  Open the project in VS Code
+2.  Go to the Run and Debug view (Ctrl+Shift+D)
+3.  Select "Debug FastAPI" from the launch configuration dropdown
+4.  Press F5 to start the server with debugging enabled
+
+### Docker Build Options
+
+To build just the Docker image:
+```bash
+docker build -t cae:latest .
+```
+
+To run the container manually:
+```bash
+docker run -d \
+  --name cae \
+  -p 8000:8000 \
+  --env-file .env \
+  cae:latest
+```
+
+### Production Deployment
+
+For production deployment:
+
+1.  **Use the production Docker setup:**
+    ```bash
+    # Build with production Dockerfile
+    docker build -f Dockerfile.prod -t cae:prod .
+    
+    # Or use docker-compose for production
+    docker-compose -f docker-compose.prod.yml up -d
+    ```
+
+2.  **Production configuration:**
+    - Use strong passwords for database
+    - Set `LOG_LEVEL=WARNING` to reduce log verbosity
+    - Configure proper API rate limiting
+    - Use environment-specific `.env` files
+
+3.  **With Nginx (recommended):**
+    ```bash
+    # Start with nginx profile
+    docker-compose -f docker-compose.prod.yml --profile with-nginx up -d
+    ```
+
+4.  **Security considerations:**
+    - Always use HTTPS in production (SSL/TLS termination)
+    - Implement API authentication if needed
+    - Regular security updates for base images
+    - Use secrets management for API keys
+    - Enable database SSL connections
+
+5.  **Monitoring:**
+    - Health endpoint: `http://your-domain/health`
+    - Application logs in `./logs` directory
+    - Configure log aggregation (ELK, CloudWatch, etc.)
+    - Set up alerts for errors and high latency
+
+6.  **Scaling:**
+    - Horizontal scaling with multiple app containers
+    - Use connection pooling for database
+    - Consider caching layer for LLM responses
+    - Load balancer for multiple instances
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LLM_API_KEY` | OpenAI API key | Required |
+| `LLM_API_BASE_URL` | LLM API base URL | `https://api.openai.com/v1` |
+| `LLM_MODEL_NAME` | LLM model to use | `gpt-4` |
+| `EMBEDDING_MODEL_API_KEY` | Embedding API key | Required |
+| `EMBEDDING_MODEL_BASE_URL` | Embedding API base URL | `https://api.openai.com/v1` |
+| `EMBEDDING_MODEL_NAME` | Embedding model | `text-embedding-3-large` |
+| `DB_HOST` | PostgreSQL host | `localhost` |
+| `DB_PORT` | PostgreSQL port | `5432` |
+| `DB_NAME` | Database name | `conversation_analysis` |
+| `DB_USER` | Database user | Required |
+| `DB_SECRET` | Database password | Required |
+| `LOG_LEVEL` | Logging level | `INFO` |
+| `LLM_TIMEOUT_SECONDS` | LLM request timeout | `600` |
 
 On startup, the application will automatically create the database tables if they do not already exist.
 

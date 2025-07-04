@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: cae-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-cae_user}
+      POSTGRES_PASSWORD: ${DB_SECRET:-cae_password}
+      POSTGRES_DB: ${DB_NAME:-conversation_analysis}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-cae_user} -d ${DB_NAME:-conversation_analysis}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  cae:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cae-app
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM Configuration
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4}
+      EMBEDDING_MODEL_API_KEY: ${EMBEDDING_MODEL_API_KEY}
+      EMBEDDING_MODEL_BASE_URL: ${EMBEDDING_MODEL_BASE_URL:-https://api.openai.com/v1}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-text-embedding-3-large}
+      # Database Configuration
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-conversation_analysis}
+      DB_USER: ${DB_USER:-cae_user}
+      DB_SECRET: ${DB_SECRET:-cae_password}
+      # Application Configuration
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-600}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+
+volumes:
+  postgres_data: 
