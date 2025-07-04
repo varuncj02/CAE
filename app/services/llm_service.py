@@ -5,6 +5,13 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from openai.types.chat.chat_completion import ChatCompletion
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
+import openai
 
 from ..utils.config import app_settings
 from ..utils.logger import logger
@@ -55,9 +62,9 @@ def clean_json_response(response: str) -> dict:
 class LLMService:
     def __init__(
         self,
-        base_url: str = app_settings.INFLECTION_BASE_URL,
-        api_key: str = app_settings.INFLECTION_API_KEY,
-        model_name: str = app_settings.INFLECTION_MODEL,
+        base_url: str = app_settings.LLM_API_BASE_URL,
+        api_key: str = app_settings.LLM_API_KEY,
+        model_name: str = app_settings.LLM_MODEL_NAME,
     ):
         self.base_url = base_url
         self.api_key = api_key
@@ -79,6 +86,7 @@ class LLMService:
         messages: Message | list[Message],
         json_response: bool = False,
         tools: str | list[str] | None = None,
+        max_tokens: int = 250,
         **kwargs,
     ) -> Message:
         """
@@ -88,6 +96,7 @@ class LLMService:
             messages: Single message or list of messages to send to LLM
             json_response: Whether to request JSON formatted response
             tools: Tool name(s) to make available to LLM
+            max_tokens: Maximum tokens for the response (default: 250)
             **kwargs: Additional parameters for the LLM API
 
         Returns:
@@ -106,6 +115,7 @@ class LLMService:
                 "tools_requested": tools,
                 "message_count": len(messages) if isinstance(messages, list) else 1,
                 "model": self.model_name,
+                "max_tokens": max_tokens,
             },
         )
 
@@ -114,12 +124,22 @@ class LLMService:
             prepared_tools = self._prepare_tools(tools, request_id)
 
             completion = await self._make_llm_request(
-                normalized_messages, prepared_tools, json_response, request_id, **kwargs
+                normalized_messages,
+                prepared_tools,
+                json_response,
+                request_id,
+                max_tokens=max_tokens,
+                **kwargs,
             )
 
             if completion.choices[0].message.tool_calls:
                 completion = await self._handle_tool_workflow(
-                    completion, normalized_messages, json_response, request_id, **kwargs
+                    completion,
+                    normalized_messages,
+                    json_response,
+                    request_id,
+                    max_tokens=max_tokens,
+                    **kwargs,
                 )
 
             return self._process_response(completion, json_response, request_id)
@@ -203,12 +223,22 @@ class LLMService:
 
         return tools_to_call
 
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        retry=(
+            retry_if_exception_type(openai.RateLimitError)
+            | retry_if_exception_type(openai.APITimeoutError)
+            | retry_if_exception_type(openai.APIConnectionError)
+        ),
+    )
     async def _make_llm_request(
         self,
         messages: list[Message],
         tools: list[dict] | None,
         json_response: bool,
         request_id: uuid.UUID,
+        max_tokens: int,
         **kwargs,
     ) -> ChatCompletion:
         """
@@ -219,6 +249,7 @@ class LLMService:
             tools: Prepared tool schemas
             json_response: Whether to request JSON response
             request_id: Request ID for logging
+            max_tokens: Maximum tokens for the response
             **kwargs: Additional LLM parameters
 
         Returns:
@@ -234,6 +265,7 @@ class LLMService:
             "messages": message_dicts,
             "tools": tools,
             "response_format": {"type": "json_object"} if json_response else None,
+            "max_tokens": max_tokens,
             **kwargs,
         }
 
@@ -249,6 +281,7 @@ class LLMService:
                     "message_count": len(messages),
                     "tools_provided": len(tools) if tools else 0,
                     "json_response": json_response,
+                    "max_tokens": request_params.get("max_tokens"),
                     "additional_params": list(kwargs.keys()),
                 },
             },
@@ -280,6 +313,7 @@ class LLMService:
         messages: list[Message],
         json_response: bool,
         request_id: uuid.UUID,
+        max_tokens: int,
         **kwargs,
     ) -> ChatCompletion:
         """
@@ -290,6 +324,7 @@ class LLMService:
             messages: Original messages
             json_response: Whether to request JSON response
             request_id: Request ID for logging
+            max_tokens: Maximum tokens for the response
             **kwargs: Additional LLM parameters
 
         Returns:
@@ -351,12 +386,9 @@ class LLMService:
             },
         )
 
-        client = self._client()
-        final_completion = await client.chat.completions.create(
-            model=self.model_name,
-            messages=message_dicts,
-            response_format={"type": "json_object"} if json_response else None,
-            **kwargs,
+        # Use retry logic for follow-up request
+        final_completion = await self._make_follow_up_request(
+            message_dicts, json_response, request_id, max_tokens, **kwargs
         )
 
         logger.info(
@@ -378,6 +410,33 @@ class LLMService:
 
         return final_completion
 
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        retry=(
+            retry_if_exception_type(openai.RateLimitError)
+            | retry_if_exception_type(openai.APITimeoutError)
+            | retry_if_exception_type(openai.APIConnectionError)
+        ),
+    )
+    async def _make_follow_up_request(
+        self,
+        message_dicts: list[dict],
+        json_response: bool,
+        request_id: uuid.UUID,
+        max_tokens: int,
+        **kwargs,
+    ) -> ChatCompletion:
+        """Make a follow-up request with tool results, with retry logic."""
+        client = self._client()
+        return await client.chat.completions.create(
+            model=self.model_name,
+            messages=message_dicts,
+            response_format={"type": "json_object"} if json_response else None,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+
     def _process_response(
         self, completion: ChatCompletion, json_response: bool, request_id: uuid.UUID
     ) -> Message | dict:
@@ -398,6 +457,27 @@ class LLMService:
         response_content = completion.choices[0].message.content
 
         if json_response:
+            # Check for None or empty content
+            if response_content is None:
+                logger.error(
+                    "LLM returned None content for JSON response",
+                    extra={
+                        "request_id": request_id,
+                        "finish_reason": completion.choices[0].finish_reason,
+                    },
+                )
+                raise LLMException("LLM returned None content for JSON response")
+
+            if not response_content.strip():
+                logger.error(
+                    "LLM returned empty content for JSON response",
+                    extra={
+                        "request_id": request_id,
+                        "finish_reason": completion.choices[0].finish_reason,
+                    },
+                )
+                raise LLMException("LLM returned empty content for JSON response")
+
             try:
                 parsed_response = json.loads(response_content)
                 logger.info(

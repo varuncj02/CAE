@@ -18,3 +18,23 @@ class LLMException(Exception):
         if self.details:
             return f"{self.message} - Details: {self.details}"
         return self.message
+
+
+class ConversationAnalysisException(Exception):
+    """Base exception for conversation analysis errors"""
+
+    pass
+
+
+class ChatHistoryNotFoundError(ConversationAnalysisException):
+    """Raised when chat history cannot be found"""
+
+    def __init__(self, chat_id: str):
+        self.chat_id = chat_id
+        super().__init__(f"No chat history found for chat_id {chat_id}")
+
+
+class MCTSException(ConversationAnalysisException):
+    """Raised when MCTS algorithm encounters an error"""
+
+    pass

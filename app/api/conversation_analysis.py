@@ -1,4 +1,5 @@
 from uuid import UUID
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends
 from ..schema.conversation_analysis import (
     ConversationAnalysisRequest,
@@ -7,7 +8,6 @@ from ..schema.conversation_analysis import (
 from ..services.conversation_analysis_service import ConversationAnalysisService
 from ..db.chat import get_chat_analyses
 from ..utils.logger import logger
-import asyncio
 
 
 router = APIRouter(prefix="/analysis", tags=["Conversation Analysis"])
@@ -44,7 +44,7 @@ async def analyze_conversation(
             extra={
                 "chat_id": str(request.chat_id),
                 "selected_branch": result.selected_branch_index,
-                "best_score": result.branches[result.selected_branch_index].eq_score,
+                "best_score": result.branches[result.selected_branch_index].score,
                 "analysis_id": str(result.id),
             },
         )
@@ -61,7 +61,7 @@ async def analyze_conversation(
         )
         raise HTTPException(status_code=400, detail=str(e))
 
-    except asyncio.TimeoutError as e:
+    except asyncio.TimeoutError:
         logger.error(
             "Timeout error in conversation analysis",
             extra={
@@ -84,7 +84,7 @@ async def analyze_conversation(
             },
             exc_info=True,
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error: " + str(e))
 
 
 @router.get("/{chat_id}", response_model=list[dict])

@@ -7,12 +7,14 @@ from sqlalchemy.orm import (
     relationship,
 )
 from sqlalchemy import String, DateTime, ForeignKey, JSON, select, delete
-from pgvector.sqlalchemy import Vector
+
+# from pgvector.sqlalchemy import Vector  # Temporarily disabled until pgvector is properly installed
 from uuid import UUID, uuid4
 from datetime import datetime
 import sqlalchemy as sa
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from ..schema.llm.chat import Chat, ChatMessage, ChatRole
 from ..schema.user import User
@@ -61,7 +63,7 @@ class ChatMessageModel(Base):
     tool_calls: Mapped[dict | None] = mapped_column(JSON)
     tool_call_id: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    embedding: Mapped[Vector | None] = mapped_column(Vector(4096))
+    # embedding: Mapped[Vector | None] = mapped_column(Vector(4096))  # Temporarily disabled until pgvector is properly installed
 
     # Relationship to chat
     chat: Mapped[ChatModel] = relationship("ChatModel", back_populates="messages")
@@ -75,7 +77,10 @@ class ConversationAnalysisModel(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    # Store the 5 branches explored
+    # Conversation goal for optimization
+    conversation_goal: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Store the branches explored
     branches: Mapped[list[dict]] = mapped_column(JSON, nullable=False)
 
     # The selected branch index and response
@@ -85,6 +90,9 @@ class ConversationAnalysisModel(Base):
     # Analysis and scoring details
     analysis: Mapped[str] = mapped_column(String, nullable=False)
     scores: Mapped[dict[str, float]] = mapped_column(JSON, nullable=False)
+
+    # MCTS algorithm statistics
+    mcts_statistics: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
     # Relationship to chat
     chat: Mapped[ChatModel] = relationship("ChatModel")
@@ -224,21 +232,25 @@ async def delete_chat_session(chat_id: UUID) -> None:
 
 async def create_conversation_analysis(
     chat_id: UUID,
+    conversation_goal: str | None,
     branches: list[dict],
     selected_branch_index: int,
     selected_response: str,
     analysis: str,
     scores: dict[str, float],
+    mcts_statistics: dict[str, Any],
 ) -> dict:
     """Creates a new conversation analysis record."""
     async with db.get_session() as session:
         new_analysis = ConversationAnalysisModel(
             chat_id=chat_id,
+            conversation_goal=conversation_goal,
             branches=branches,
             selected_branch_index=selected_branch_index,
             selected_response=selected_response,
             analysis=analysis,
             scores=scores,
+            mcts_statistics=mcts_statistics,
         )
         session.add(new_analysis)
         await session.commit()
@@ -247,11 +259,13 @@ async def create_conversation_analysis(
             "id": new_analysis.id,
             "chat_id": new_analysis.chat_id,
             "created_at": new_analysis.created_at,
+            "conversation_goal": new_analysis.conversation_goal,
             "branches": new_analysis.branches,
             "selected_branch_index": new_analysis.selected_branch_index,
             "selected_response": new_analysis.selected_response,
             "analysis": new_analysis.analysis,
             "scores": new_analysis.scores,
+            "mcts_statistics": new_analysis.mcts_statistics,
         }
 
 
@@ -269,11 +283,13 @@ async def get_chat_analyses(chat_id: UUID) -> list[dict]:
                 "id": a.id,
                 "chat_id": a.chat_id,
                 "created_at": a.created_at,
+                "conversation_goal": a.conversation_goal,
                 "branches": a.branches,
                 "selected_branch_index": a.selected_branch_index,
                 "selected_response": a.selected_response,
                 "analysis": a.analysis,
                 "scores": a.scores,
+                "mcts_statistics": a.mcts_statistics,
             }
             for a in analyses
         ]

@@ -48,7 +48,6 @@ async def log_requests(request: Request, call_next):
     """Log all incoming requests and their responses"""
     start_time = time.time()
 
-    # Log request details
     body = await request.body()
     logger.info(
         f"Incoming request: {request.method} {request.url.path}",
@@ -61,16 +60,13 @@ async def log_requests(request: Request, call_next):
         },
     )
 
-    # Reset body stream for the actual request processing
     async def receive():
         return {"type": "http.request", "body": body}
 
     request._receive = receive
 
-    # Process request
     response = await call_next(request)
 
-    # Log response
     process_time = time.time() - start_time
     logger.info(
         f"Request completed: {request.method} {request.url.path}",
@@ -158,7 +154,6 @@ if __name__ == "__main__":
         app,
         host="0.0.0.0",
         port=8000,
-        log_config=logger,
         log_level="info",
         access_log=True,
     )

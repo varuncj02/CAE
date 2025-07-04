@@ -1,6 +1,5 @@
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel
 
 from ..db import chat as db
 from ..schema.user import User, UserCreate
@@ -189,7 +188,6 @@ async def get_user_chats(user_id: UUID):
             )
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Get user's chats
         chats = await db.get_user_chats(user_id)
         logger.info(
             "User chats retrieved successfully",

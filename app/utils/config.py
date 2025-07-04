@@ -9,9 +9,6 @@ class Config(BaseSettings):
         strict=False,
     )
 
-    INFLECTION_API_KEY: str
-    INFLECTION_BASE_URL: str
-    INFLECTION_MODEL: str
     LLM_API_KEY: str
     LLM_API_BASE_URL: str
     LLM_MODEL_NAME: str
