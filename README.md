@@ -1,5 +1,8 @@
 # Conversational Analysis Engine (CAE)
 
+![Demo](media/demo-gif.gif)
+
+
 ## Project Goal
 
 The core idea behind this project is to move beyond static, single-turn training data for language models. Real-world conversation is a dynamic, branching tree of possibilities, where each response can lead to a different outcome. Standard instruction-response datasets don't capture this complexity.
