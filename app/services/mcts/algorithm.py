@@ -25,6 +25,13 @@ class MCTSAlgorithm:
         self.scorer = scorer
         self.tree_ops = TreeOperations()
 
+        self._k = MCTSConfig.PROG_WIDEN_K
+        self._alpha = MCTSConfig.PROG_WIDEN_ALPHA
+        self._uct_c = MCTSConfig.DEFAULT_EXPLORATION_CONSTANT
+    
+    def _expansion_limit(self, node: MCTSNode) -> int:
+        return max(1, int(self._k * (node.visits ** self._alpha)))
+
     async def run(
         self,
         base_messages: list[Message],
@@ -80,7 +87,7 @@ class MCTSAlgorithm:
         self, root: MCTSNode, exploration_constant: float
     ) -> MCTSNode:
         node = root
-        while node.children and node.is_fully_expanded():
+        while node.children and node.is_fully_expanded(self._expansion_limit(node)):
             node = node.best_child(exploration_constant)
         return node
 
@@ -89,7 +96,7 @@ class MCTSAlgorithm:
     ) -> tuple[float, list[MCTSNode]]:
         new_children = []
 
-        if not node.is_fully_expanded() and node.visits > 0:
+        if not node.is_fully_expanded(self._expansion_limit(node)) and node.visits > 0:
             extended_messages = self._build_conversation_path(base_messages, node)
             existing_responses = [child.response for child in node.children]
 

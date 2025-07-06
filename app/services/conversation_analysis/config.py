@@ -11,6 +11,9 @@ class MCTSConfig:
     PRUNING_THRESHOLD_RATIO = 0.7
     MIN_VISITS_FOR_PRUNING = 5
 
+    # Progressive Widening
+    PROG_WIDEN_K = 1.0      
+    PROG_WIDEN_ALPHA = 0.5
 
 @dataclass
 class ScoringConfig:
